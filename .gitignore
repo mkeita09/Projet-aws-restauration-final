@@ -1,1 +1,5 @@
 env_aws.sh
+
+xport AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="abc123..."
+export AWS_DEFAULT_REGION
