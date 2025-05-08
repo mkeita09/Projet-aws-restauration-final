@@ -1,0 +1,83 @@
+---
+- name: Restauration complète de l'EC2
+  hosts: ec2
+  become: yes
+  vars:
+    bucket_name: sauvegarde-makan-keita
+
+  tasks:
+
+    - name: Installer nginx, ufw et fail2ban
+      apt:
+        name:
+          - nginx
+          - ufw
+          - fail2ban
+        state: present
+        update_cache: yes
+
+    - name: Télécharger AWS CLI
+      get_url:
+        url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+        dest: /tmp/awscliv2.zip
+
+    - name: Décompresser AWS CLI
+      unarchive:
+        src: /tmp/awscliv2.zip
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Installer AWS CLI
+      shell: sudo /tmp/aws/install
+      args:
+        creates: /usr/local/bin/aws
+
+    - name: Créer répertoire temporaire
+      file:
+        path: /tmp/restore
+        state: directory
+        mode: '0755'
+
+    - name: Créer le fichier env_aws.sh pour les identifiants AWS
+      copy:
+        dest: /root/env_aws.sh
+        content: |
+          export AWS_DEFAULT_REGION="eu-north-1"
+        mode: '0600'
+
+    - name: Télécharger la dernière archive depuis S3
+      shell: |
+        source /root/env_aws.sh
+        latest=$(aws s3 ls s3://{{ bucket_name }}/ | sort | tail -n 1 | awk '{print $4}')
+        aws s3 cp s3://{{ bucket_name }}/$latest /tmp/restore/backup.tar.gz
+      args:
+        executable: /bin/bash
+
+    - name: Décompresser l'archive
+      unarchive:
+        src: /tmp/restore/backup.tar.gz
+        dest: /
+        remote_src: yes
+        extra_opts: [--overwrite]
+
+    - name: Restaurer les utilisateurs depuis users_restore.sh s’il existe
+      shell: bash /root/users_restore.sh
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+
+    - name: Activer UFW
+      ufw:
+        state: enabled
+
+    - name: S'assurer que fail2ban est lancé
+      service:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    - name: Ajouter une étiquette de restauration
+      lineinfile:
+        path: /etc/machine-info
+        line: "restaure_le={{ ansible_date_time.date }}"
+        create: yes
